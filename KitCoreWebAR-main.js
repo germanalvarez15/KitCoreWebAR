@@ -315,20 +315,21 @@ class KitCoreWebAR extends HTMLElement {
             const lon = parseFloat(element.getAttribute("lon"));
             const src = element.getAttribute("src");
             const distance = parseFloat(element.getAttribute("distance")) || null;
+            const altitude = parseFloat(element.getAttribute("altitude")) || AR_CONFIG.MODEL_HEIGHT;
 
             if (lat && lon && src) {
-                this.addObject(lat, lon, src, distance);
+                this.addObject(lat, lon, src, distance, altitude);
             }
         });
     }
-    async addObject(lat, lon, modelSrc, distance = null) {
+    async addObject(lat, lon, modelSrc, distance = null, altitude = AR_CONFIG.MODEL_HEIGHT) {
         try {
             const object = await this.modelLoader.loadModel(modelSrc, {
                 scale: AR_CONFIG.MODEL_SCALE,
             });
 
             object.visible = false;
-            this.objects.push({ lat, lon, object, distance, anchor: null });
+            this.objects.push({ lat, lon, object, distance, altitude, anchor: null });
         } catch (error) {
             console.error("Error loading object:", error);
         }
@@ -339,7 +340,7 @@ class KitCoreWebAR extends HTMLElement {
             (position) => {
                 const userLat = position.coords.latitude;
                 const userLon = position.coords.longitude;
-                this.objects.forEach(({ lat, lon, object, distance }) => {
+                this.objects.forEach(({ lat, lon, object, distance, altitude }) => {
                     const detectionRadius = distance || this.getAttribute("distance") || AR_CONFIG.DETECTION_RADIUS;
                     const distanceToUser = GeolocationManager.calculateDistance(
                         userLat, userLon, lat, lon
@@ -351,7 +352,7 @@ class KitCoreWebAR extends HTMLElement {
                             lat, lon, userLat, userLon
                         );
 
-                        object.position.set(x, AR_CONFIG.MODEL_HEIGHT, z);
+                        object.position.set(x, altitude, z);
                     } else {
                         object.visible = false;
                     }
@@ -391,7 +392,7 @@ class KitCoreWebAR extends HTMLElement {
                                 this.currentUserLat,
                                 this.currentUserLon
                             );
-                            const y = AR_CONFIG.MODEL_HEIGHT;
+                            const y = obj.altitude;
                             const transform = new XRRigidTransform({ x, y, z });
                             frame.createAnchor(transform, referenceSpace)
                                 .then((anchor) => {
