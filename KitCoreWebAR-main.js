@@ -7,7 +7,8 @@ const MODES = {
     VIEWER: 'viewer',
     FLOOR: 'floor',
     WALL: 'wall',
-    GPS: 'gps'
+    GPS: 'gps',
+    ANCHORS: 'anchors'
 };
 
 const AR_CONFIG = { //Default config
@@ -229,11 +230,23 @@ class KitCoreWebAR extends HTMLElement {
                 this.openSceneViewer();
                 return;
             }
-            this.session = await navigator.xr.requestSession("immersive-ar", {
-                requiredFeatures: ["local-floor", "hit-test"],
-                optionalFeatures: ["dom-overlay", "plane-detection"],
-                domOverlay: { root: this.domOverlayContainer }
-            });
+
+            let sessionInit = {};
+            if (this.mode === MODES.ANCHORS) {
+                sessionInit = {
+                    requiredFeatures: ["local-floor", "anchors"],
+                    optionalFeatures: ["dom-overlay"],
+                    domOverlay: { root: this.domOverlayContainer }
+                };
+            } else {
+                sessionInit = {
+                    requiredFeatures: ["local-floor", "hit-test"],
+                    optionalFeatures: ["dom-overlay", "plane-detection"],
+                    domOverlay: { root: this.domOverlayContainer }
+                };
+            }
+
+            this.session = await navigator.xr.requestSession("immersive-ar", sessionInit);
 
             this.domOverlayContainer.style.display = "flex";
             console.log("WebXR activated.");
@@ -277,6 +290,11 @@ class KitCoreWebAR extends HTMLElement {
             this.enableGPS();
         }
 
+        if (this.mode === MODES.ANCHORS) {
+            this.loadObjects();
+            this.enableAnchors();
+        }
+
         // Set XR session
         this.sceneManager.renderer.xr.setSession(this.session);
 
@@ -310,7 +328,7 @@ class KitCoreWebAR extends HTMLElement {
             });
 
             object.visible = false;
-            this.objects.push({ lat, lon, object, distance });
+            this.objects.push({ lat, lon, object, distance, anchor: null });
         } catch (error) {
             console.error("Error loading object:", error);
         }
@@ -342,6 +360,77 @@ class KitCoreWebAR extends HTMLElement {
             (error) => console.error("Error obtaining geolocation:", error),
             { enableHighAccuracy: true }
         );
+    }
+
+    enableAnchors() {
+        navigator.geolocation.watchPosition(
+            (position) => {
+                this.currentUserLat = position.coords.latitude;
+                this.currentUserLon = position.coords.longitude;
+            },
+            (error) => console.error("Error obtaining geolocation:", error),
+            { enableHighAccuracy: true }
+        );
+
+        this.sceneManager.renderer.setAnimationLoop((timestamp, frame) => {
+            if (frame && this.currentUserLat !== undefined && this.currentUserLon !== undefined) {
+                const referenceSpace = this.sceneManager.renderer.xr.getReferenceSpace();
+                this.objects.forEach((obj) => {
+                    const detectionRadius = obj.distance || this.getAttribute("distance") || AR_CONFIG.DETECTION_RADIUS;
+                    const distanceToUser = GeolocationManager.calculateDistance(
+                        this.currentUserLat,
+                        this.currentUserLon,
+                        obj.lat,
+                        obj.lon
+                    );
+                    if (distanceToUser < detectionRadius) {
+                        if (!obj.anchor) {
+                            const { x, z } = GeolocationManager.convertGPSToMeters(
+                                obj.lat,
+                                obj.lon,
+                                this.currentUserLat,
+                                this.currentUserLon
+                            );
+                            const y = AR_CONFIG.MODEL_HEIGHT;
+                            const transform = new XRRigidTransform({ x, y, z });
+                            frame.createAnchor(transform, referenceSpace)
+                                .then((anchor) => {
+                                    obj.anchor = anchor;
+                                    obj.object.visible = true;
+                                })
+                                .catch((err) => {
+                                    console.error("Error creating anchor:", err);
+                                });
+                        } else {
+                            const anchorPose = frame.getPose(obj.anchor.anchorSpace, referenceSpace);
+                            if (anchorPose) {
+                                obj.object.position.set(
+                                    anchorPose.transform.position.x,
+                                    anchorPose.transform.position.y,
+                                    anchorPose.transform.position.z
+                                );
+                                obj.object.quaternion.set(
+                                    anchorPose.transform.orientation.x,
+                                    anchorPose.transform.orientation.y,
+                                    anchorPose.transform.orientation.z,
+                                    anchorPose.transform.orientation.w
+                                );
+                                obj.object.visible = true;
+                            }
+                        }
+                    } else {
+                        obj.object.visible = false;
+                        if (obj.anchor) {
+                            if (typeof obj.anchor.delete === "function") {
+                                obj.anchor.delete();
+                            }
+                            obj.anchor = null;
+                        }
+                    }
+                });
+            }
+            this.sceneManager.renderer.render(this.sceneManager.scene, this.sceneManager.camera);
+        });
     }
 
     enablePlacement() {
