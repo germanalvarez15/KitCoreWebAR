@@ -148,71 +148,6 @@ class GeolocationManager {
     }
 }
 
-class UIManager {
-    constructor(camera) {
-        this.camera = camera;
-        this.uiPanel = null;
-        this.uiTexture = null;
-    }
-
-    createUI3D() {
-        const canvas = document.createElement("canvas");
-        canvas.width = 512;
-        canvas.height = 128;
-        const ctx = canvas.getContext("2d");
-
-        ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = "white";
-        ctx.font = "bold 36px Arial";
-        ctx.textAlign = "center";
-        ctx.fillText(
-            "Move around to detect a surface",
-            canvas.width / 2,
-            canvas.height / 2
-        );
-
-        this.uiTexture = new THREE.CanvasTexture(canvas);
-        const material = new THREE.MeshBasicMaterial({
-            map: this.uiTexture,
-            side: THREE.DoubleSide,
-            transparent: true,
-        });
-
-        const geometry = new THREE.PlaneGeometry(1.5, 0.3);
-        this.uiPanel = new THREE.Mesh(geometry, material);
-        this.uiPanel.position.set(0, -1, -2.1);
-        this.camera.add(this.uiPanel);
-
-        return this;
-    }
-
-    updateUIText(message = "Move around to detect a surface") {
-        if (!this.uiTexture) return;
-
-        const ctx = this.uiTexture.image.getContext("2d");
-        ctx.clearRect(
-            0,
-            0,
-            this.uiTexture.image.width,
-            this.uiTexture.image.height
-        );
-
-        ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
-        ctx.fillRect(0, 0, this.uiTexture.image.width, this.uiTexture.image.height);
-        ctx.fillStyle = "white";
-        ctx.font = "bold 30px Arial";
-        ctx.textAlign = "center";
-        ctx.fillText(
-            message,
-            this.uiTexture.image.width / 2,
-            this.uiTexture.image.height / 2
-        );
-
-        this.uiTexture.needsUpdate = true;
-    }
-}
-
 class KitCoreWebAR extends HTMLElement {
     constructor() {
         super();
@@ -222,6 +157,20 @@ class KitCoreWebAR extends HTMLElement {
         this.container.style.height = "100%";
         this.container.style.position = "relative";
         this.shadowRoot.appendChild(this.container);
+
+        this.domOverlayContainer = document.createElement("div");
+        this.domOverlayContainer.id = "dom-overlay";
+        this.domOverlayContainer.style.display = "flex";
+        this.domOverlayContainer.style.justifyContent = "end";
+        this.domOverlayContainer.style.alignItems = "center";
+        this.domOverlayContainer.style.flexDirection = "column";
+        this.domOverlayContainer.style.color = "white";
+        this.domOverlayContainer.style.fontSize = "25px";
+        this.domOverlayContainer.style.paddingBottom = "50px";
+        this.domOverlayContainer.style.fontFamily = "Arial, sans-serif";
+        this.domOverlayContainer.style.textAlign = "center";
+        this.domOverlayContainer.style.display = "none";
+        this.shadowRoot.appendChild(this.domOverlayContainer);
 
         this.mode = this.getAttribute("mode") || MODES.VIEWER;
         this.objects = [];
@@ -282,9 +231,11 @@ class KitCoreWebAR extends HTMLElement {
             }
             this.session = await navigator.xr.requestSession("immersive-ar", {
                 requiredFeatures: ["local-floor", "hit-test"],
-                optionalFeatures: ["plane-detection"],
+                optionalFeatures: ["dom-overlay", "plane-detection"],
+                domOverlay: { root: this.domOverlayContainer }
             });
 
+            this.domOverlayContainer.style.display = "flex";
             console.log("WebXR activated.");
             this.initScene();
 
@@ -313,8 +264,11 @@ class KitCoreWebAR extends HTMLElement {
 
         // Handle different AR modes
         if (this.mode === MODES.FLOOR || this.mode === MODES.WALL) {
-            this.uiManager = new UIManager(this.sceneManager.camera)
-                .createUI3D();
+            if (this.mode === MODES.FLOOR) {
+                this.domOverlayContainer.innerText = "Move around to detect a surface";
+            } else {
+                this.domOverlayContainer.innerText = "Move to find a vertical surface";
+            }
             this.enablePlacement();
         }
 
@@ -424,30 +378,35 @@ class KitCoreWebAR extends HTMLElement {
                     if (frame && this.hitTestSource) {
                         const hitTestResults = frame.getHitTestResults(this.hitTestSource);
 
-                        if (this.uiManager.uiPanel) {
-                            if (hitTestResults.length > 0) {
-                                const referenceSpace =
-                                    this.sceneManager.renderer.xr.getReferenceSpace();
-                                const hitPose = hitTestResults[0].getPose(referenceSpace);
+                        if (hitTestResults.length > 0) {
+                            const referenceSpace =
+                                this.sceneManager.renderer.xr.getReferenceSpace();
+                            const hitPose = hitTestResults[0].getPose(referenceSpace);
 
-                                if (this.mode === "wall") {
-                                    const normal = hitPose.transform.orientation;
-                                    const isVertical = this.isVerticalSurface(normal);
+                            if (this.mode === "wall") {
+                                const normal = hitPose.transform.orientation;
+                                const isVertical = this.isVerticalSurface(normal);
+                                if (!this.placedObject.visible) {
+                                    if (isVertical) {
 
-                                    this.uiManager.updateUIText(
-                                        isVertical
-                                            ? "Wall detected, tap to place"
-                                            : "Surface detected, tap to place"
-                                    );
-                                } else {
-                                    this.uiManager.updateUIText("Surface detected, tap to place");
+                                        this.domOverlayContainer.innerText = "Wall detected, tap to place";
+                                    } else {
+                                        this.domOverlayContainer.innerText = "Surface detected, tap to place";
+                                    }
                                 }
                             } else {
-                                this.uiManager.updateUIText(
-                                    this.mode === "wall"
-                                        ? "Move to find a vertical surface"
-                                        : "Move around to detect a surface"
-                                );
+                                if (!this.placedObject.visible) {
+                                    this.domOverlayContainer.innerText = "Surface detected, tap to place";
+                                }
+                            }
+                        } else {
+                            if (!this.placedObject.visible) {
+                                if (this.mode === "wall") {
+                                    this.domOverlayContainer.innerText = "Move to find a vertical surface";
+                                }
+                                else {
+                                    this.domOverlayContainer.innerText = "Move around to detect a surface";
+                                }
                             }
                         }
 
@@ -479,8 +438,8 @@ class KitCoreWebAR extends HTMLElement {
                     this.placedObject.visible = true;
                     this.placedObject.position.copy(pose.transform.position);
                 }
-                if (this.uiManager.uiPanel) {
-                    this.uiManager.uiPanel.visible = false;
+                if (this.domOverlayContainer && this.placedObject.visible) {
+                    this.domOverlayContainer.innerText = "";
                 }
             }
         });
@@ -640,7 +599,6 @@ export {
     SceneManager,
     ModelLoader,
     GeolocationManager,
-    UIManager,
     MODES,
     AR_CONFIG,
 };
