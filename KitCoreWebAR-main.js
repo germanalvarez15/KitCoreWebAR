@@ -297,10 +297,14 @@ class KitCoreWebAR extends HTMLElement {
 
         // Set XR session
         this.sceneManager.renderer.xr.setSession(this.session);
-
         // GPS mode rendering loop
         if (this.mode === MODES.GPS) {
             this.sceneManager.renderer.setAnimationLoop(() => {
+                this.objects.forEach(obj => {
+                    if (obj.lookatuser && obj.object.visible) {
+                        obj.object.lookAt(this.sceneManager.camera.position);
+                    }
+                });
                 this.sceneManager.renderer.render(
                     this.sceneManager.scene,
                     this.sceneManager.camera
@@ -316,20 +320,21 @@ class KitCoreWebAR extends HTMLElement {
             const src = element.getAttribute("src");
             const distance = parseFloat(element.getAttribute("distance")) || null;
             const altitude = parseFloat(element.getAttribute("altitude")) || AR_CONFIG.MODEL_HEIGHT;
+            const lookatuser = element.getAttribute("lookatuser") === "true";
 
             if (lat && lon && src) {
-                this.addObject(lat, lon, src, distance, altitude);
+                this.addObject(lat, lon, src, distance, altitude, lookatuser);
             }
         });
     }
-    async addObject(lat, lon, modelSrc, distance = null, altitude = AR_CONFIG.MODEL_HEIGHT) {
+    async addObject(lat, lon, modelSrc, distance = null, altitude = AR_CONFIG.MODEL_HEIGHT, lookatuser = false) {
         try {
             const object = await this.modelLoader.loadModel(modelSrc, {
                 scale: AR_CONFIG.MODEL_SCALE,
             });
 
             object.visible = false;
-            this.objects.push({ lat, lon, object, distance, altitude, anchor: null });
+            this.objects.push({ lat, lon, object, distance, altitude, lookatuser, anchor: null });
         } catch (error) {
             console.error("Error loading object:", error);
         }
@@ -428,6 +433,9 @@ class KitCoreWebAR extends HTMLElement {
                             obj.anchor = null;
                         }
                     }
+                    if (obj.lookatuser && obj.object.visible) {
+                        obj.object.lookAt(this.sceneManager.camera.position);
+                    }
                 });
             }
             this.sceneManager.renderer.render(this.sceneManager.scene, this.sceneManager.camera);
@@ -445,7 +453,6 @@ class KitCoreWebAR extends HTMLElement {
             console.error("Attribute 'src' not defined in <kitcore-webar-object>.");
             return;
         }
-
         this.modelLoader.loadModel(modelSrc)
             .then((placedObject) => {
                 this.placedObject = placedObject;
@@ -478,7 +485,6 @@ class KitCoreWebAR extends HTMLElement {
                                 const isVertical = this.isVerticalSurface(normal);
                                 if (!this.placedObject.visible) {
                                     if (isVertical) {
-
                                         this.domOverlayContainer.innerText = "Wall detected, tap to place";
                                     } else {
                                         this.domOverlayContainer.innerText = "Surface detected, tap to place";
@@ -524,7 +530,6 @@ class KitCoreWebAR extends HTMLElement {
                         // Adjust the rotation of the object to match the wall normal
                         this.placedObject.quaternion.copy(pose.transform.orientation);
                     }
-
                     this.placedObject.visible = true;
                     this.placedObject.position.copy(pose.transform.position);
                 }
