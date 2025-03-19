@@ -11,7 +11,7 @@ const MODES = {
     ANCHORS: 'anchors'
 };
 
-const AR_CONFIG = { //Default config
+const AR_CONFIG = { // Default config
     DETECTION_RADIUS: 10, // meters
     MODEL_HEIGHT: 1.5,
     MODEL_SCALE: 0.5,
@@ -34,12 +34,7 @@ class SceneManager {
             this.scene.background = new THREE.Color(0xaaaaaa);
         }
 
-        this.camera = new THREE.PerspectiveCamera(
-            75,
-            width / height,
-            0.1,
-            1000
-        );
+        this.camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
 
         if (options.cameraPosition) {
             this.camera.position.set(
@@ -60,7 +55,6 @@ class SceneManager {
         }
 
         this.container.appendChild(this.renderer.domElement);
-
         this.addLighting();
         return this;
     }
@@ -68,13 +62,11 @@ class SceneManager {
     addLighting() {
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
         const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-
         directionalLight.position.set(5, 10, 5);
         directionalLight.castShadow = true;
 
         this.scene.add(ambientLight);
         this.scene.add(directionalLight);
-
         return this;
     }
 
@@ -106,7 +98,6 @@ class ModelLoader {
                         options.scale || AR_CONFIG.MODEL_SCALE,
                         options.scale || AR_CONFIG.MODEL_SCALE
                     );
-
                     if (options.position) {
                         object.position.set(
                             options.position.x,
@@ -114,7 +105,6 @@ class ModelLoader {
                             options.position.z
                         );
                     }
-
                     this.scene.add(object);
                     resolve(object);
                 },
@@ -129,14 +119,11 @@ class GeolocationManager {
     static calculateDistance(lat1, lon1, lat2, lon2) {
         const R = AR_CONFIG.EARTH_RADIUS;
         const toRad = (deg) => deg * (Math.PI / 180);
-
         const dLat = toRad(lat2 - lat1);
         const dLon = toRad(lon2 - lon1);
-
         const a =
             Math.sin(dLat / 2) ** 2 +
             Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-
         return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
@@ -144,9 +131,72 @@ class GeolocationManager {
         const R = AR_CONFIG.EARTH_RADIUS;
         const dLat = (lat - refLat) * (Math.PI / 180) * R;
         const dLon = (lon - refLon) * (Math.PI / 180) * R * Math.cos((refLat * Math.PI) / 180);
-
         return { x: dLon, z: -dLat };
     }
+}
+
+function setupNativeTouchControls(placedObject, element, options = { rotateEnabled: true, scaleEnabled: true }) {
+    console.log('setupNativeTouchControls iniciado');
+    let initialTouchDistance = null;
+    let initialTouchAngle = null;
+    let initialScale = placedObject.scale.x;
+    let initialRotation = placedObject.rotation.y;
+
+    function getDistance(t1, t2) {
+        const dx = t2.clientX - t1.clientX;
+        const dy = t2.clientY - t1.clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function getAngle(t1, t2) {
+        const dx = t2.clientX - t1.clientX;
+        const dy = t2.clientY - t1.clientY;
+        return Math.atan2(dy, dx);
+    }
+
+    element.addEventListener("touchstart", (e) => {
+        if (e.touches.length === 2) {
+            e.preventDefault();
+            const touch1 = e.touches[0];
+            const touch2 = e.touches[1];
+            initialTouchDistance = getDistance(touch1, touch2);
+            initialTouchAngle = getAngle(touch1, touch2);
+            initialScale = placedObject.scale.x;
+            initialRotation = placedObject.rotation.y;
+        }
+    }, { passive: false });
+
+    element.addEventListener("touchmove", (e) => {
+        if (e.touches.length === 2) {
+            e.preventDefault();
+            const touch1 = e.touches[0];
+            const touch2 = e.touches[1];
+            const currentDistance = getDistance(touch1, touch2);
+            const currentAngle = getAngle(touch1, touch2);
+
+            if (options.scaleEnabled && initialTouchDistance !== null) {
+                const scaleFactor = currentDistance / initialTouchDistance;
+                placedObject.scale.set(
+                    initialScale * scaleFactor,
+                    initialScale * scaleFactor,
+                    initialScale * scaleFactor
+                );
+            }
+
+            if (options.rotateEnabled && initialTouchAngle !== null) {
+                const angleDiff = currentAngle - initialTouchAngle;
+                placedObject.rotation.y = initialRotation - angleDiff;
+            }
+        }
+    }, { passive: false });
+
+    element.addEventListener("touchend", (e) => {
+        console.log('touchend', e.touches);
+        if (e.touches.length < 2) {
+            initialTouchDistance = null;
+            initialTouchAngle = null;
+        }
+    }, { passive: false });
 }
 
 class KitCoreWebAR extends HTMLElement {
@@ -157,6 +207,7 @@ class KitCoreWebAR extends HTMLElement {
         this.container.style.width = "100%";
         this.container.style.height = "100%";
         this.container.style.position = "relative";
+        this.container.style.touchAction = "none";
         this.shadowRoot.appendChild(this.container);
 
         this.domOverlayContainer = document.createElement("div");
@@ -170,8 +221,13 @@ class KitCoreWebAR extends HTMLElement {
         this.domOverlayContainer.style.paddingBottom = "50px";
         this.domOverlayContainer.style.fontFamily = "Arial, sans-serif";
         this.domOverlayContainer.style.textAlign = "center";
+        this.domOverlayContainer.style.touchAction = "none";
         this.domOverlayContainer.style.display = "none";
         this.shadowRoot.appendChild(this.domOverlayContainer);
+
+        this.rotateEnabled = this.getAttribute("rotate") !== "false";
+        this.scaleEnabled = this.getAttribute("scale") !== "false";
+        this.positionateEnabled = this.getAttribute("positionate") !== "false";
 
         this.mode = this.getAttribute("mode") || MODES.VIEWER;
         this.objects = [];
@@ -189,7 +245,6 @@ class KitCoreWebAR extends HTMLElement {
 
     setupARButton() {
         this.userButton = document.querySelector("[kitcore-webar-button]");
-
         if (!this.userButton && this.autoGenerateButton) {
             this.createAutoButton();
         } else if (this.userButton) {
@@ -223,14 +278,12 @@ class KitCoreWebAR extends HTMLElement {
             alert("Your device does not support WebXR.");
             return;
         }
-
         try {
             console.log(`Attempting to start WebXR in mode: ${this.mode}`);
             if (this.mode === MODES.VIEWER) {
                 this.openSceneViewer();
                 return;
             }
-
             let sessionInit = {};
             if (this.mode === MODES.ANCHORS) {
                 sessionInit = {
@@ -245,13 +298,10 @@ class KitCoreWebAR extends HTMLElement {
                     domOverlay: { root: this.domOverlayContainer }
                 };
             }
-
             this.session = await navigator.xr.requestSession("immersive-ar", sessionInit);
-
             this.domOverlayContainer.style.display = "flex";
             console.log("WebXR activated.");
             this.initScene();
-
             if (this.startButton) this.startButton.remove();
         } catch (error) {
             console.error("Error activating WebXR:", error);
@@ -264,17 +314,13 @@ class KitCoreWebAR extends HTMLElement {
             this.initViewerMode();
             return;
         }
-
         // Create scene manager
         this.sceneManager = new SceneManager(this.container, this.mode)
             .createScene(window.innerWidth, window.innerHeight);
-
         // Initialize model loader
         this.modelLoader = new ModelLoader(this.sceneManager.scene);
-
         // Add camera to scene
         this.sceneManager.scene.add(this.sceneManager.camera);
-
         // Handle different AR modes
         if (this.mode === MODES.FLOOR || this.mode === MODES.WALL) {
             if (this.mode === MODES.FLOOR) {
@@ -284,17 +330,14 @@ class KitCoreWebAR extends HTMLElement {
             }
             this.enablePlacement();
         }
-
         if (this.mode === MODES.GPS) {
             this.loadObjects();
             this.enableGPS();
         }
-
         if (this.mode === MODES.ANCHORS) {
             this.loadObjects();
             this.enableAnchors();
         }
-
         // Set XR session
         this.sceneManager.renderer.xr.setSession(this.session);
         // GPS mode rendering loop
@@ -321,18 +364,17 @@ class KitCoreWebAR extends HTMLElement {
             const distance = parseFloat(element.getAttribute("distance")) || null;
             const altitude = parseFloat(element.getAttribute("altitude")) || AR_CONFIG.MODEL_HEIGHT;
             const lookatuser = element.getAttribute("lookatuser") === "true";
-
             if (lat && lon && src) {
                 this.addObject(lat, lon, src, distance, altitude, lookatuser);
             }
         });
     }
+
     async addObject(lat, lon, modelSrc, distance = null, altitude = AR_CONFIG.MODEL_HEIGHT, lookatuser = false) {
         try {
             const object = await this.modelLoader.loadModel(modelSrc, {
                 scale: AR_CONFIG.MODEL_SCALE,
             });
-
             object.visible = false;
             this.objects.push({ lat, lon, object, distance, altitude, lookatuser, anchor: null });
         } catch (error) {
@@ -347,16 +389,10 @@ class KitCoreWebAR extends HTMLElement {
                 const userLon = position.coords.longitude;
                 this.objects.forEach(({ lat, lon, object, distance, altitude }) => {
                     const detectionRadius = distance || this.getAttribute("distance") || AR_CONFIG.DETECTION_RADIUS;
-                    const distanceToUser = GeolocationManager.calculateDistance(
-                        userLat, userLon, lat, lon
-                    );
-
+                    const distanceToUser = GeolocationManager.calculateDistance(userLat, userLon, lat, lon);
                     if (distanceToUser < detectionRadius) {
                         object.visible = true;
-                        const { x, z } = GeolocationManager.convertGPSToMeters(
-                            lat, lon, userLat, userLon
-                        );
-
+                        const { x, z } = GeolocationManager.convertGPSToMeters(lat, lon, userLat, userLon);
                         object.position.set(x, altitude, z);
                     } else {
                         object.visible = false;
@@ -377,7 +413,6 @@ class KitCoreWebAR extends HTMLElement {
             (error) => console.error("Error obtaining geolocation:", error),
             { enableHighAccuracy: true }
         );
-
         this.sceneManager.renderer.setAnimationLoop((timestamp, frame) => {
             if (frame && this.currentUserLat !== undefined && this.currentUserLon !== undefined) {
                 const referenceSpace = this.sceneManager.renderer.xr.getReferenceSpace();
@@ -457,6 +492,8 @@ class KitCoreWebAR extends HTMLElement {
             .then((placedObject) => {
                 this.placedObject = placedObject;
                 this.placedObject.visible = false;
+                // Indicamos que aún no se ha posicionado (para controlar el reposicionamiento)
+                this.placedObject.isPlaced = false;
             })
             .catch(error => console.error("Error loading placement model:", error));
 
@@ -470,16 +507,12 @@ class KitCoreWebAR extends HTMLElement {
             })
             .then((hitTestSource) => {
                 this.hitTestSource = hitTestSource;
-
                 this.sceneManager.renderer.setAnimationLoop((timestamp, frame) => {
                     if (frame && this.hitTestSource) {
                         const hitTestResults = frame.getHitTestResults(this.hitTestSource);
-
                         if (hitTestResults.length > 0) {
-                            const referenceSpace =
-                                this.sceneManager.renderer.xr.getReferenceSpace();
+                            const referenceSpace = this.sceneManager.renderer.xr.getReferenceSpace();
                             const hitPose = hitTestResults[0].getPose(referenceSpace);
-
                             if (this.mode === "wall") {
                                 const normal = hitPose.transform.orientation;
                                 const isVertical = this.isVerticalSurface(normal);
@@ -499,13 +532,11 @@ class KitCoreWebAR extends HTMLElement {
                             if (!this.placedObject.visible) {
                                 if (this.mode === "wall") {
                                     this.domOverlayContainer.innerText = "Move to find a vertical surface";
-                                }
-                                else {
+                                } else {
                                     this.domOverlayContainer.innerText = "Move around to detect a surface";
                                 }
                             }
                         }
-
                         this.sceneManager.renderer.render(
                             this.sceneManager.scene,
                             this.sceneManager.camera
@@ -527,11 +558,20 @@ class KitCoreWebAR extends HTMLElement {
                 const pose = hit.getPose(referenceSpace);
                 if (pose) {
                     if (this.mode === "wall") {
-                        // Adjust the rotation of the object to match the wall normal
                         this.placedObject.quaternion.copy(pose.transform.orientation);
                     }
+                    // Si el objeto aún no ha sido posicionado o si se permite reposicionar (positionateEnabled), actualizamos la posición.
+                    if (!this.placedObject.isPlaced || this.positionateEnabled) {
+                        this.placedObject.position.copy(pose.transform.position);
+                        this.placedObject.isPlaced = true;
+                    }
                     this.placedObject.visible = true;
-                    this.placedObject.position.copy(pose.transform.position);
+
+                    // Configuramos los gestos táctiles usando el DOM overlay y pasamos las opciones según los atributos.
+                    setupNativeTouchControls(this.placedObject, this.domOverlayContainer, {
+                        rotateEnabled: this.rotateEnabled,
+                        scaleEnabled: this.scaleEnabled
+                    });
                 }
                 if (this.domOverlayContainer && this.placedObject.visible) {
                     this.domOverlayContainer.innerText = "";
@@ -542,21 +582,12 @@ class KitCoreWebAR extends HTMLElement {
 
     isVerticalSurface(orientation) {
         const rotationMatrix = new THREE.Matrix4().makeRotationFromQuaternion(
-            new THREE.Quaternion(
-                orientation.x,
-                orientation.y,
-                orientation.z,
-                orientation.w
-            )
+            new THREE.Quaternion(orientation.x, orientation.y, orientation.z, orientation.w)
         );
-
         const normal = new THREE.Vector3(0, 0, 1).applyMatrix4(rotationMatrix);
-
         const verticalVector = new THREE.Vector3(0, 1, 0);
         const angle = normal.angleTo(verticalVector);
-
         const verticalThreshold = Math.PI / 4;
-
         return Math.abs(angle - Math.PI / 2) < verticalThreshold;
     }
 
@@ -568,23 +599,17 @@ class KitCoreWebAR extends HTMLElement {
         }
         const modelSrc = objectElem.getAttribute("src");
         if (!modelSrc) {
-            console.error(
-                "Attribute 'src' not defined in <kitcore-webar-object>."
-            );
+            console.error("Attribute 'src' not defined in <kitcore-webar-object>.");
             return;
         }
-
         // Create scene manager for viewer mode
         this.sceneManager = new SceneManager(this.container, this.mode)
             .createScene(
                 this.container.clientWidth,
                 this.container.clientHeight,
-                {
-                    cameraPosition: { x: 0, y: 1, z: 3 }
-                }
+                { cameraPosition: { x: 0, y: 1, z: 3 } }
             )
             .setupResizeObserver();
-
         // Setup orbit controls for viewer mode
         this.controls = new OrbitControls(
             this.sceneManager.camera,
@@ -597,7 +622,6 @@ class KitCoreWebAR extends HTMLElement {
         this.controls.maxDistance = 10;
         this.controls.target.set(0, 1, 0);
         this.controls.update();
-
         // Load model
         const modelLoader = new ModelLoader(this.sceneManager.scene);
         modelLoader.loadModel(modelSrc, {
@@ -608,7 +632,6 @@ class KitCoreWebAR extends HTMLElement {
         }).catch((error) => {
             console.error("Error loading the model:", error);
         });
-
         // Animation loop
         this.sceneManager.renderer.setAnimationLoop(() => {
             this.controls.update();
@@ -617,7 +640,6 @@ class KitCoreWebAR extends HTMLElement {
                 this.sceneManager.camera
             );
         });
-
         // Create scene viewer button
         this.createSceneViewerButton(modelSrc);
     }
@@ -628,21 +650,17 @@ class KitCoreWebAR extends HTMLElement {
             console.error("Couldn't find element <kitcore-webar-object>.");
             return;
         }
-
         const isIOS = (
             /iPad|iPhone|iPod/.test(navigator.userAgent) ||
             (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) ||
             (navigator.userAgentData && navigator.userAgentData.platform === "iOS")
         );
-
         const modelSrc = objectElem.getAttribute("src");
         const usdzSrc = objectElem.getAttribute("usdz");
-
         if (!modelSrc) {
             console.error("Attribute 'src' not defined in <kitcore-webar-object>.");
             return;
         }
-
         if (isIOS && !usdzSrc) {
             console.error("Attribute 'usdz' not defined in <kitcore-webar-object>.");
             return;
@@ -659,9 +677,7 @@ class KitCoreWebAR extends HTMLElement {
         this.arButton.style.color = "white";
         this.arButton.style.border = "none";
         this.arButton.style.cursor = "pointer";
-
         this.container.appendChild(this.arButton);
-
         this.arButton.addEventListener("click", () =>
             this.openSceneViewer(modelSrc, usdzSrc)
         );
@@ -673,7 +689,6 @@ class KitCoreWebAR extends HTMLElement {
             (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) ||
             (navigator.userAgentData && navigator.userAgentData.platform === "iOS")
         );
-
         if (isIOS && usdzSrc) {
             // Open the model in Quick Look
             const anchor = document.createElement("a");
