@@ -14,7 +14,7 @@ KitCore WebAR is a lightweight JavaScript library for integrating WebAR (Web-bas
 To use KitCore WebAR, include the library in your project:
 
 ```html
-<script type="module" src="https://cdn.jsdelivr.net/gh/germanalvarez15/KitCoreWebAR@v0.0.1/KitCoreWebAR-main.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/gh/germanalvarez15/KitCoreWebAR@v0.1.0/KitCoreWebAR-main.js"></script>
 ```
 
 ## Usage
