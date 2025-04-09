@@ -228,27 +228,52 @@ class KitCoreWebAR extends HTMLElement {
         this.rotateEnabled = this.getAttribute("rotate") !== "false";
         this.scaleEnabled = this.getAttribute("scale") !== "false";
         this.positionateEnabled = this.getAttribute("positionate") !== "false";
+        this.arEnabled = this.getAttribute("ar-enabled") !== "false";
 
         this.mode = this.getAttribute("mode") || MODES.VIEWER;
         this.objects = [];
+        this.currentObjectIndex = 0;
         this.autoGenerateButton = this.getAttribute("auto-button") !== "false";
         this.init();
     }
 
     init() {
+        // Always setup the AR button first
+        this.setupARButton();
+
+        // Then initialize the appropriate mode
         if (this.mode === MODES.VIEWER) {
             this.initViewerMode();
-        } else {
-            this.setupARButton();
         }
     }
 
     setupARButton() {
         this.userButton = document.querySelector("[kitcore-webar-button]");
-        if (!this.userButton && this.autoGenerateButton) {
+        if (!this.userButton && this.autoGenerateButton && this.mode !== MODES.VIEWER) {
             this.createAutoButton();
         } else if (this.userButton) {
-            this.userButton.addEventListener("click", () => this.requestWebXRSession());
+            this.userButton.addEventListener("click", () => {
+                if (this.mode === MODES.VIEWER) {
+                    // Don't proceed if AR is disabled
+                    if (!this.arEnabled) {
+                        return;
+                    }
+                    const objectElem = this.querySelector("kitcore-webar-object");
+                    if (!objectElem) {
+                        console.error("Couldn't find element <kitcore-webar-object>.");
+                        return;
+                    }
+                    const modelSrc = objectElem.getAttribute("src");
+                    const usdzSrc = objectElem.getAttribute("usdz");
+                    if (!modelSrc) {
+                        console.error("Attribute 'src' not defined in <kitcore-webar-object>.");
+                        return;
+                    }
+                    this.openSceneViewer(modelSrc, usdzSrc);
+                } else {
+                    this.requestWebXRSession();
+                }
+            });
         }
     }
 
@@ -592,16 +617,12 @@ class KitCoreWebAR extends HTMLElement {
     }
 
     initViewerMode() {
-        const objectElem = this.querySelector("kitcore-webar-object");
-        if (!objectElem) {
-            console.error("Couldn't find element <kitcore-webar-object>.");
+        const objectElements = this.querySelectorAll("kitcore-webar-object");
+        if (objectElements.length === 0) {
+            console.error("Couldn't find any <kitcore-webar-object> elements.");
             return;
         }
-        const modelSrc = objectElem.getAttribute("src");
-        if (!modelSrc) {
-            console.error("Attribute 'src' not defined in <kitcore-webar-object>.");
-            return;
-        }
+
         // Create scene manager for viewer mode
         this.sceneManager = new SceneManager(this.container, this.mode)
             .createScene(
@@ -610,6 +631,7 @@ class KitCoreWebAR extends HTMLElement {
                 { cameraPosition: { x: 0, y: 1, z: 3 } }
             )
             .setupResizeObserver();
+
         // Setup orbit controls for viewer mode
         this.controls = new OrbitControls(
             this.sceneManager.camera,
@@ -622,16 +644,43 @@ class KitCoreWebAR extends HTMLElement {
         this.controls.maxDistance = 10;
         this.controls.target.set(0, 1, 0);
         this.controls.update();
-        // Load model
+
+        // Load all models
         const modelLoader = new ModelLoader(this.sceneManager.scene);
-        modelLoader.loadModel(modelSrc, {
-            scale: 1,
-            position: { x: 0, y: 0, z: 0 }
-        }).then((model) => {
-            this.model = model;
-        }).catch((error) => {
-            console.error("Error loading the model:", error);
+        this.viewerObjects = [];
+
+        Promise.all(Array.from(objectElements).map((element, index) => {
+            const modelSrc = element.getAttribute("src");
+            const iconSrc = element.getAttribute("icon");
+            if (!modelSrc) {
+                console.error("Attribute 'src' not defined in <kitcore-webar-object>.");
+                return null;
+            }
+            return modelLoader.loadModel(modelSrc, {
+                scale: 1,
+                position: { x: 0, y: 0, z: 0 }
+            }).then(model => {
+                // Set all models to invisible initially
+                model.visible = false;
+                return {
+                    model,
+                    icon: iconSrc,
+                    visible: false
+                };
+            });
+        })).then(objects => {
+            this.viewerObjects = objects.filter(obj => obj !== null);
+            // Make only the first object visible
+            if (this.viewerObjects.length > 0) {
+                this.viewerObjects[0].model.visible = true;
+                this.viewerObjects[0].visible = true;
+                this.currentObjectIndex = 0;
+            }
+            this.createCarousel();
+        }).catch(error => {
+            console.error("Error loading models:", error);
         });
+
         // Animation loop
         this.sceneManager.renderer.setAnimationLoop(() => {
             this.controls.update();
@@ -640,8 +689,61 @@ class KitCoreWebAR extends HTMLElement {
                 this.sceneManager.camera
             );
         });
+
         // Create scene viewer button
-        this.createSceneViewerButton(modelSrc);
+        this.createSceneViewerButton();
+    }
+
+    createCarousel() {
+        if (this.viewerObjects.length <= 1) return;
+
+        const carousel = document.createElement("div");
+        carousel.style.position = "absolute";
+        carousel.style.bottom = "20px";
+        carousel.style.left = "50%";
+        carousel.style.transform = "translateX(-50%)";
+        carousel.style.display = "flex";
+        carousel.style.gap = "10px";
+        carousel.style.padding = "10px";
+        carousel.style.background = "rgba(0,0,0,0.5)";
+        carousel.style.borderRadius = "20px";
+        carousel.style.zIndex = "1000";
+
+        this.viewerObjects.forEach((obj, index) => {
+            const icon = document.createElement("img");
+            icon.src = obj.icon || "default-icon.png";
+            icon.style.width = "40px";
+            icon.style.height = "40px";
+            icon.style.borderRadius = "50%";
+            icon.style.cursor = "pointer";
+            icon.style.opacity = obj.visible ? "1" : "0.5";
+            icon.style.transition = "opacity 0.3s";
+            icon.style.objectFit = "cover";
+
+            icon.addEventListener("click", () => {
+                this.viewerObjects.forEach(o => {
+                    o.model.visible = false;
+                    o.visible = false;
+                });
+                obj.model.visible = true;
+                obj.visible = true;
+                this.currentObjectIndex = index;
+                this.updateCarouselIcons();
+            });
+
+            carousel.appendChild(icon);
+        });
+
+        this.container.appendChild(carousel);
+        this.carousel = carousel;
+    }
+
+    updateCarouselIcons() {
+        if (!this.carousel) return;
+        const icons = this.carousel.querySelectorAll("img");
+        icons.forEach((icon, index) => {
+            icon.style.opacity = index === this.currentObjectIndex ? "1" : "0.5";
+        });
     }
 
     createSceneViewerButton() {
@@ -650,6 +752,18 @@ class KitCoreWebAR extends HTMLElement {
             console.error("Couldn't find element <kitcore-webar-object>.");
             return;
         }
+
+        // Check if there's already a custom button
+        const existingButton = document.querySelector("[kitcore-webar-button]");
+        if (existingButton) {
+            return; // Don't create the integrated button if a custom one exists
+        }
+
+        // Don't create the button if AR is disabled
+        if (!this.arEnabled) {
+            return;
+        }
+
         const isIOS = (
             /iPad|iPhone|iPod/.test(navigator.userAgent) ||
             (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) ||
@@ -665,22 +779,43 @@ class KitCoreWebAR extends HTMLElement {
             console.error("Attribute 'usdz' not defined in <kitcore-webar-object>.");
             return;
         }
-        this.arButton = document.createElement("button");
-        this.arButton.innerText = "View in AR";
+
+        // Create button container
+        this.arButton = document.createElement("div");
         this.arButton.style.position = "absolute";
-        this.arButton.style.bottom = "20px";
-        this.arButton.style.left = "50%";
-        this.arButton.style.transform = "translateX(-50%)";
-        this.arButton.style.padding = "10px 20px";
-        this.arButton.style.fontSize = "16px";
-        this.arButton.style.background = "blue";
-        this.arButton.style.color = "white";
-        this.arButton.style.border = "none";
+        this.arButton.style.top = "20px";
+        this.arButton.style.right = "20px";
+        this.arButton.style.display = "flex";
+        this.arButton.style.flexDirection = "column";
+        this.arButton.style.alignItems = "center";
         this.arButton.style.cursor = "pointer";
-        this.container.appendChild(this.arButton);
+        this.arButton.style.zIndex = "1000";
+
+        // Create image
+        const image = document.createElement("img");
+        image.src = "https://cdn.glitch.global/fb107cc3-eb61-429f-842c-0f7804a6f140/view-in-ar.png";
+        image.style.width = "40px";
+        image.style.height = "40px";
+        image.style.marginBottom = "5px";
+
+        // Create text
+        const text = document.createElement("span");
+        text.innerText = "View in AR";
+        text.style.color = "white";
+        text.style.fontSize = "14px";
+        text.style.fontFamily = "Arial, sans-serif";
+        text.style.textAlign = "center";
+
+        // Add elements to button
+        this.arButton.appendChild(image);
+        this.arButton.appendChild(text);
+
+        // Add click event
         this.arButton.addEventListener("click", () =>
             this.openSceneViewer(modelSrc, usdzSrc)
         );
+
+        this.container.appendChild(this.arButton);
     }
 
     openSceneViewer(modelSrc, usdzSrc) {
