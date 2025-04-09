@@ -24,7 +24,7 @@ Visit the [KitCore WebAR Docs](https://kitcorewebar-docs.vercel.app/) to explore
 To use KitCore WebAR, include the library in your project:
 
 ```html
-<script type="module" src="https://cdn.jsdelivr.net/gh/germanalvarez15/KitCoreWebAR@v0.1.0/KitCoreWebAR-main.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/gh/germanalvarez15/KitCoreWebAR@v0.1.1/KitCoreWebAR-main.js"></script>
 ```
 
 ## Usage
