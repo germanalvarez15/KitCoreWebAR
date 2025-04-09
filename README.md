@@ -2,6 +2,16 @@
 
 KitCore WebAR is a lightweight JavaScript library for integrating WebAR (Web-based Augmented Reality) experiences using the WebXR Device API and Three.js. This library enables developers to create interactive AR experiences with different modes, including surface detection and GPS-based object placement.
 
+##  Documentation & Playground
+
+This repository includes comprehensive documentation and an interactive playground to help you get started with KitCoreWebAR:
+
+- **Documentation**: A detailed guide covering all aspects of the library, from installation to advanced features. The documentation is organized into clear sections with examples and explanations.
+- **Playground**: An interactive environment where you can experiment with KitCoreWebAR in real-time. Test different modes, attributes, and features without setting up a full project.
+
+Visit the [KitCore WebAR Docs](https://kitcorewebar-docs.vercel.app/) to explore the full documentation and try out the playground.
+
+
 ## Features
 
 - **Multiple AR Modes:** Supports Viewer, Floor, Wall, and GPS-based placement.
